@@ -17,14 +17,23 @@ module ActiveRecord
     #   - then we sort them from major to minor lenght, in order to detect tables which name is a composition of two
     #     names, i.e, posts, comments and comments_posts. It is for make easier the regular expression
     #   - and finally, the regular expression is built
-    cattr_accessor :table_names
+    cattr_accessor :table_names, :enableMemcacheQueryForModels
     self.table_names = /#{connection.tables.sort_by { |c| c.length }.join('|')}/i
-
+    self.enableMemcacheQueryForModels ||= {}
     class << self
       
-      #TODO: put this class method at the top of your AR model to enable memcache for the queryCache
+      #put this class method at the top of your AR model to enable memcache for the queryCache, otherwise it will use
+      #standard query cache
       def enable_memache_queryCache
+        self.enableMemcacheQueryForModels[ActiveRecord::Base.send(:class_name_of_active_record_descendant, self).to_s] = true
       end
+
+      def connection_with_memcache_query_cache
+        conn = connection_without_memcache_query_cache
+        conn.enable_memcache_query_cache = self.enableMemcacheQueryForModels.key?(self.to_s)
+        conn
+      end
+      alias_method_chain :connection, :memcache_query_cache
       
       def cache_version_key(table_name = nil)
         "#{global_cache_version_key}/#{table_name || self.table_name}"
@@ -54,12 +63,15 @@ module ActiveRecord
   end
 
   module ConnectionAdapters # :nodoc:
-    # Only prepared for MySQL adapter
+    class AbstractAdapter
+      attr_accessor :enable_memcache_query_cache
+    end
+    
     class MysqlAdapter < AbstractAdapter
 
       # alias_method_chain for expiring cache if necessary
       def execute_with_clean_query_cache(*args)
-        return execute_without_clean_query_cache(*args) unless query_cache_enabled
+        return execute_without_clean_query_cache(*args) unless self.enable_memcache_query_cache && query_cache_enabled
         sql = args[0].strip
         if sql =~ /^(INSERT|UPDATE|ALTER|DROP|DELETE)/i
           #can only modify one table at a time...so stop after matching the first table name
@@ -74,6 +86,8 @@ module ActiveRecord
     end
 
   module QueryCache
+
+    attr_reader :enable_memcache_query_cache
 
     # Enable the query cache within the block
     def cache
@@ -109,13 +123,13 @@ module ActiveRecord
           if @query_cache.has_key?(sql)
             log_info(sql, "CACHE", 0.0)
             @query_cache[sql]
-          elsif cached_result = ::Rails.cache.read(query_key(sql))
+          elsif self.enable_memcache_query_cache && cached_result = ::Rails.cache.read(query_key(sql))
             log_info(sql, "MEMCACHE", 0.0)
             @query_cache[sql] = cached_result
           else
             query_result = yield
             @query_cache[sql] = query_result
-            ::Rails.cache.write(query_key(sql), query_result)
+            ::Rails.cache.write(query_key(sql), query_result) if self.enable_memcache_query_cache
             query_result
           end
 
