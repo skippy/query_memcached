@@ -24,13 +24,15 @@ module ActiveRecord
       
       #put this class method at the top of your AR model to enable memcache for the queryCache, otherwise it will use
       #standard query cache
-      def enable_memache_queryCache
-        self.enableMemcacheQueryForModels[ActiveRecord::Base.send(:class_name_of_active_record_descendant, self).to_s] = true
+      def enable_memache_queryCache(options = {})
+        #TODO: setup default timeouts
+        options[:expires_in] ||= 90.minutes
+        self.enableMemcacheQueryForModels[ActiveRecord::Base.send(:class_name_of_active_record_descendant, self).to_s] = options
       end
 
       def connection_with_memcache_query_cache
         conn = connection_without_memcache_query_cache
-        conn.enable_memcache_query_cache = self.enableMemcacheQueryForModels.key?(self.to_s)
+        conn.memcache_query_cache_options = self.enableMemcacheQueryForModels[self.to_s]
         conn
       end
       alias_method_chain :connection, :memcache_query_cache
@@ -64,14 +66,14 @@ module ActiveRecord
 
   module ConnectionAdapters # :nodoc:
     class AbstractAdapter
-      attr_accessor :enable_memcache_query_cache
+      attr_accessor :memcache_query_cache_options
     end
     
     class MysqlAdapter < AbstractAdapter
 
       # alias_method_chain for expiring cache if necessary
       def execute_with_clean_query_cache(*args)
-        return execute_without_clean_query_cache(*args) unless self.enable_memcache_query_cache && query_cache_enabled
+        return execute_without_clean_query_cache(*args) unless self.memcache_query_cache_options && query_cache_enabled
         sql = args[0].strip
         if sql =~ /^(INSERT|UPDATE|ALTER|DROP|DELETE)/i
           #can only modify one table at a time...so stop after matching the first table name
@@ -87,7 +89,7 @@ module ActiveRecord
 
   module QueryCache
 
-    attr_reader :enable_memcache_query_cache
+    attr_reader :memcache_query_cache_options
 
     # Enable the query cache within the block
     def cache
@@ -123,13 +125,13 @@ module ActiveRecord
           if @query_cache.has_key?(sql)
             log_info(sql, "CACHE", 0.0)
             @query_cache[sql]
-          elsif self.enable_memcache_query_cache && cached_result = ::Rails.cache.read(query_key(sql))
+          elsif self.memcache_query_cache_options && cached_result = ::Rails.cache.read(query_key(sql), self.memcache_query_cache_options)
             log_info(sql, "MEMCACHE", 0.0)
             @query_cache[sql] = cached_result
           else
             query_result = yield
             @query_cache[sql] = query_result
-            ::Rails.cache.write(query_key(sql), query_result) if self.enable_memcache_query_cache
+            ::Rails.cache.write(query_key(sql), query_result, self.memcache_query_cache_options) if self.memcache_query_cache_options
             query_result
           end
 
