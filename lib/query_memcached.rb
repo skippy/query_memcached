@@ -1,11 +1,5 @@
 require 'digest/md5'
 
-unless defined?(::Rails.cache) || ::Rails.cache.class.is_a?(ActiveSupport::Cache::MemCacheStore)
-  warning = "[Query memcached WARNING] ::Rails.cache is not defined or cache engine is not mem_cache_store"
-  ActiveRecord::Base.logger.error warning
-  raise warning
-end
-
 module ActiveRecord
 
   class Base
@@ -24,10 +18,15 @@ module ActiveRecord
       
       #put this class method at the top of your AR model to enable memcache for the queryCache, otherwise it will use
       #standard query cache
-      def enable_memache_queryCache(options = {})
+      def enable_memache_querycache(options = {})
         #TODO: setup default timeouts
-        options[:expires_in] ||= 90.minutes
-        self.enableMemcacheQueryForModels[ActiveRecord::Base.send(:class_name_of_active_record_descendant, self).to_s] = options
+        if ActionController::Base.perform_caching && defined?(::Rails.cache) && ::Rails.cache.is_a?(ActiveSupport::Cache::MemCacheStore)
+          options[:expires_in] ||= 90.minutes
+          self.enableMemcacheQueryForModels[ActiveRecord::Base.send(:class_name_of_active_record_descendant, self).to_s] = options
+        else
+          warning = "[Query memcached WARNING] Disabled for #{ActiveRecord::Base.send(:class_name_of_active_record_descendant, self)} -- Memcache for QueryCache is not enabled for this model because caching is not turned on, Rails.cache is not defined, or cache engine is not mem_cache_store"
+          ActiveRecord::Base.logger.error warning
+        end
       end
 
       def connection_with_memcache_query_cache

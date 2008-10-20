@@ -55,11 +55,11 @@ Any comments and suggestions are welcome.
 
 ## CHANGES for this fork
 
-hey folks, I changed the behavior in one major way.  I made the memcaching of the QueryCache optional.  You need to add _enable_memache_queryCache_ to your AcitveRecord model, like so
+hey folks, I changed the behavior in one major way.  I made the memcaching of the QueryCache optional.  You need to add _enable_memache_querycache_ to your AcitveRecord model, like so
 
 <code>
   class User < ActiveRecord::Base
-    enable_memache_queryCache
+    enable_memache_querycache
   end
 </code>
 
