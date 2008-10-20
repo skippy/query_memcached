@@ -12,6 +12,8 @@ If you want to install it like a git module you can follow this post, adapting t
 
 <http://woss.name/2008/04/09/using-git-submodules-to-track-vendorrails/>
 
+*NOTE:* see comments below about how this fork is different
+
 ## Requirements
 
   - Ruby >= 1.8.5
@@ -50,6 +52,21 @@ The tests of this plugin are not so standard so I decided to wrote a very explic
 There is a list of pending features, bugs, and so on in a file named TODO.
 
 Any comments and suggestions are welcome.
+
+## CHANGES for this fork
+
+hey folks, I changed the behavior in one major way.  I made the memcaching of the QueryCache optional.  You need to add _enable_memache_queryCache_ to your AcitveRecord model, like so
+
+<code>
+  class User < ActiveRecord::Base
+    enable_memache_queryCache
+  end
+</code>
+
+The reason for this (drastic) change is two fold.  
+  - For starters, there are many tables where trying to cache the contents but expiring all caching on any insert/update/delete/drop/alter on the table causes unnecessary overhead.  A sessions table is a perfect example.  I also have a metrics table and a few other tables where the contents are changed _often_.  By not enabling memcache on tables that I know will constantly be changing I can save quite a number of needless memcache calls (not caching the session queries saves two reads and two writes per request).  
+  - The other reason is I don't quite trust the implications of having a persisted query cache.  I want to carefully roll it out, starting with just the few models that rarely change, and go from there.  I'm not worried about users seeing information they shouldn't be, as the key is the query; it is more about making sure things expire correctly.  I didn't want to push such a large caching change into my app without a careful (and long) rollout.
+
 
 ## Another comments
 
