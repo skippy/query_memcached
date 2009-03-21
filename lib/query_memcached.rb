@@ -3,7 +3,6 @@ require 'digest/md5'
 module ActiveRecord
 
   class Base
-
     # table_names is a special attribute that contains a regular expression with all the tables of the application
     # Its main purpose  is to detect all the tables that a query affects.
     # It is build in a special way:
@@ -12,8 +11,10 @@ module ActiveRecord
     #     names, i.e, posts, comments and comments_posts. It is for make easier the regular expression
     #   - and finally, the regular expression is built
     cattr_accessor :table_names, :enableMemcacheQueryForModels
+    cattr_reader :memcache_query_caching_enabled #gives us a nice clean way to say if we will be using this query cache.
     self.table_names = /#{connection.tables.sort_by { |c| c.length }.join('|')}/i
     self.enableMemcacheQueryForModels ||= {}
+    
     class << self
       
       #put this class method at the top of your AR model to enable memcache for the queryCache, otherwise it will use
@@ -23,7 +24,9 @@ module ActiveRecord
         if ActionController::Base.perform_caching && defined?(::Rails.cache) && ::Rails.cache.is_a?(ActiveSupport::Cache::MemCacheStore)
           options[:expires_in] ||= 90.minutes
           self.enableMemcacheQueryForModels[ActiveRecord::Base.send(:class_name_of_active_record_descendant, self).to_s] = options
+          @@memcache_query_caching_enabled = true
         else
+          @@memcache_query_caching_enabled = false
           warning = "[Query memcached WARNING] Disabled for #{ActiveRecord::Base.send(:class_name_of_active_record_descendant, self)} -- Memcache for QueryCache is not enabled for this model because caching is not turned on, Rails.cache is not defined, or cache engine is not mem_cache_store"
           ActiveRecord::Base.logger.error warning
         end
@@ -36,8 +39,8 @@ module ActiveRecord
       end
       alias_method_chain :connection, :memcache_query_cache
       
-      def cache_version_key(table_name = nil)
-        "#{global_cache_version_key}/#{table_name || self.table_name}"
+      def cache_version_key(tm = self.table_name)
+        "#{global_cache_version_key}/#{tm}"
       end
 
       def global_cache_version_key
@@ -72,12 +75,12 @@ module ActiveRecord
 
       # alias_method_chain for expiring cache if necessary
       def execute_with_clean_query_cache(*args)
-        return execute_without_clean_query_cache(*args) unless self.memcache_query_cache_options && query_cache_enabled
+        return execute_without_clean_query_cache(*args) unless ActiveRecord::Base.memcache_query_caching_enabled
         sql = args[0].strip
         if sql =~ /^(INSERT|UPDATE|ALTER|DROP|DELETE)/i
           #can only modify one table at a time...so stop after matching the first table name
           table_name = ActiveRecord::Base.extract_table_names(sql).first
-          ActiveRecord::Base.increase_version!(table_name)
+          ActiveRecord::Base.increase_version!(table_name) if table_name
         end
         execute_without_clean_query_cache(*args)
       end
